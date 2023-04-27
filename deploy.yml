@@ -1,0 +1,117 @@
+---
+- hosts: aws_ec2
+  tasks:
+    - name: installing packages
+      become: true
+      apt:
+        name: 
+          - nginx
+          - unzip
+          - acl
+          - python3-pip
+          - mysql-server
+          - libmysqlclient-dev
+          - python3-dev
+          - python3-mysqldb
+        update_cache: yes
+    - name: adding backend user
+      become: true
+      user:
+        name: backend
+    - name: download application
+      get_url: 
+        url: https://github.com/jvchamroeun/2023-prp-bbapp/archive/refs/heads/main.zip
+        dest: /tmp/source.zip
+    - name: create code directory for source archive
+      file:
+        path: /tmp/code
+        state: directory
+    - name: extract source archive for backend files
+      unarchive:
+        src: /tmp/source.zip
+        dest: /tmp/code
+        remote_src: yes
+    - name: create a directory for frontend file
+      become: true
+      file: 
+        path: /frontend
+        state: directory
+        owner: "{{ ansible_ssh_user }}"
+    - name: create a directory for backend files
+      become: true
+      file:
+        path: /backend
+        state: directory
+        owner: backend
+    - name: set up frontend file
+      copy:
+        src: /tmp/code/2023-prp-bbapp-main/frontend/index.html
+        dest: /frontend/index.html
+        remote_src: yes
+    - name: set up backend files
+      become: true
+      become_user: backend
+      copy:
+        src: /tmp/code/2023-prp-bbapp-main/backend/
+        dest: /backend/
+        remote_src: yes
+    - name: copy modified nginx configuration file to instance
+      become: true
+      copy:
+        src: nginx
+        dest: /etc/nginx/sites-available/default
+    - name: restart nginx.service
+      become: true
+      systemd:
+        name: nginx
+        state: restarted
+    - name: pip install backend requirements
+      become: true
+      become_user: backend
+      pip:
+        requirements: /backend/requirements.txt
+        extra_args: --user
+        executable: pip3
+    - name: create a new database named "backend"
+      become: true
+      mysql_db:
+        name: backend
+        state: present
+    - name: create database user 'example' and password 'secure' with all database privileges
+      become: true
+      mysql_user:
+        name: example
+        password: secure
+        priv: '*.*:ALL,GRANT'
+        state: present
+    - name: copy backend service file into systemd
+      become: true
+      copy:
+        src: service
+        dest: /etc/systemd/system/backend.service
+    - name: daemon-reload to detect backend.service
+      become: true
+      systemd:
+        daemon_reload: true
+    - name: start and enable backend.service
+      become: true
+      systemd:
+        name: backend
+        state: started
+        enabled: true
+    - name: setup data files for backend mysql database
+      become: true
+      become_user: backend
+      copy:
+        src: data
+        dest: /backend/data.sql
+    - name: import initial data for mysql backend database
+      become: true
+      become_user: backend
+      mysql_db:
+        login_user: example
+        login_password: secure
+        name: backend
+        state: import
+        target: /backend/data.sql
+      
